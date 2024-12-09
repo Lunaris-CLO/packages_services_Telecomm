@@ -2127,9 +2127,9 @@ public class CallAudioRouteStateMachine extends StateMachine implements CallAudi
         boolean isSkipEarpiece = false;
         if (!isExplicitUserRequest) {
             synchronized (mLock) {
-                // Check video calls with speaker on to skip earpiece since the baseline
-                // for video calls should be the speakerphone route
-                isSkipEarpiece = mCallsManager.hasVideoCall() && isSpeakerPhoneOn();
+                // Check video calls to skip earpiece since the baseline for video
+                // calls should be the speakerphone route
+                isSkipEarpiece = mCallsManager.hasVideoCall();
             }
         }
         if ((mAvailableRoutes & ROUTE_BLUETOOTH) != 0
