@@ -4639,6 +4639,10 @@ public class CallsManager extends Call.ListenerBase
         return getAllCallWithState(CallState.RINGING, CallState.ANSWERED);
     }
 
+    private List<Call> getAllOngoingCalls() {
+        return getAllCallWithState(ONGOING_CALL_STATES);
+    }
+
     public Call getActiveCall() {
         return getFirstCallWithState(CallState.ACTIVE);
     }
@@ -5467,6 +5471,27 @@ public class CallsManager extends Call.ListenerBase
                 ONGOING_CALL_STATES) > 0;
     }
 
+    private PhoneAccountHandle getPhoneAccountForCall(Call call) {
+        if (call == null) {
+            Log.w(this, "getPhoneAccountForCall: call is null.");
+            return null;
+        }
+        PhoneAccountHandle callPhoneAccount = call.getTargetPhoneAccount();
+        if (callPhoneAccount == null && call.isConference() &&
+                !call.getChildCalls().isEmpty()) {
+            callPhoneAccount = getFirstChildPhoneAccount(call);
+            Log.i(this, "getPhoneAccountForCall: using child call PhoneAccount = " +
+                  callPhoneAccount);
+        }
+        return callPhoneAccount;
+    }
+
+    private boolean isPhoneAccountHfp(PhoneAccountHandle phoneAccount) {
+        return mContext.getString(R.string.hfp_client_connection).equals(
+                   phoneAccount == null ? null :
+                   phoneAccount.getComponentName().getClassName());
+    }
+
     /**
      * Determines if the system incoming call UI should be shown.
      * The system incoming call UI will be shown if the new incoming call is self-managed, and there
@@ -5480,6 +5505,20 @@ public class CallsManager extends Call.ListenerBase
                 && incomingCall.getHandoverSourceCall() == null;
     }
 
+    private void disconnectCallForEmergency(Call liveCall, String disconnectReason) {
+        liveCall.setOverrideDisconnectCauseCode(new DisconnectCause(
+                DisconnectCause.LOCAL, DisconnectCause.REASON_EMERGENCY_CALL_PLACED));
+        liveCall.disconnect(disconnectReason);
+    }
+
+    /**
+     * Make room for a pending outgoing emergency {@link Call}.
+     * <p>
+     * Note: This method is only applicable when {@link FeatureFlags#enableCallSequencing()}
+     * is false.
+     * @param call The new pending outgoing call.
+     * @return true if room was made, false if no room could be made.
+     */
     @VisibleForTesting
     public boolean makeRoomForOutgoingEmergencyCall(Call emergencyCall) {
         // Always disconnect any ringing/incoming calls when an emergency call is placed to minimize
@@ -5528,6 +5567,21 @@ public class CallsManager extends Call.ListenerBase
             // Not likely, but a good correctness check.
             return true;
         }
+
+        // Disconnect all HFP calls to avoid an ACTIVE + ACTIVE conflict.
+        // BluetoothInCallService isn't guaranteed to hold calls
+        // and HFP calls are in a different phone account from
+        // cellular calls. It is safer to disconnect HFP calls here
+        // than to attempt to hold them.
+        List<Call> ongoingCalls = getAllOngoingCalls();
+        for (Call ongoingCall : ongoingCalls) {
+            PhoneAccountHandle account = getPhoneAccountForCall(ongoingCall);
+            if (account != null && isPhoneAccountHfp(account)) {
+                disconnectCallForEmergency(ongoingCall,
+                    "Disconnecting ongoing call to make room for emergency call");
+            }
+        }
+
 
         if (hasMaximumOutgoingCalls(emergencyCall)) {
             Call outgoingCall = getFirstCallWithState(OUTGOING_CALL_STATES);
@@ -5608,8 +5662,10 @@ public class CallsManager extends Call.ListenerBase
                         DisconnectCause.LOCAL, DisconnectCause.REASON_EMERGENCY_CALL_PLACED));
                 liveCall.disconnect("outgoing call does not support emergency calls, "
                         + "disconnecting.");
+                Log.d(this, "makeRoomForOutgoingEmergencyCall: Disconnecting live "
+                        + "call because outgoing call does not support emergency calls.");
+                return true;
             }
-            return true;
         }
 
         // First thing, if we are trying to make an emergency call with the same package name as
@@ -5631,6 +5687,7 @@ public class CallsManager extends Call.ListenerBase
             // hold but they still support adding a call by going immediately into conference
             // mode). Return true here and we'll run this code again after user chooses an
             // account.
+            Log.d(this, "makeRoomForOutgoingEmergencyCall: Null phone account for emergency call.");
             return true;
         }
 
