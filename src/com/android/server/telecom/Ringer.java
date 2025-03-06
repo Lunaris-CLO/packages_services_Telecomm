@@ -596,6 +596,8 @@ public class Ringer {
                 return false;
             }
 
+            mAttributesLatch = new CountDownLatch(1);
+
             // Use completable future to establish a timeout, not intent to make these work outside
             // the main thread asynchronously
             // TODO: moving these RingerAttributes calculation out of Telecom lock to avoid blocking
@@ -605,7 +607,6 @@ public class Ringer {
 
             RingerAttributes attributes = null;
             try {
-                mAttributesLatch = new CountDownLatch(1);
                 attributes = ringerAttributesFuture.get(
                         RINGER_ATTRIBUTES_TIMEOUT, TimeUnit.MILLISECONDS);
             } catch (ExecutionException | InterruptedException | TimeoutException e) {
@@ -1193,7 +1194,9 @@ public class Ringer {
             call.setUserMissed(USER_MISSED_DND_MODE);
         }
 
-        mAttributesLatch.countDown();
+        if (mAttributesLatch != null) {
+            mAttributesLatch.countDown();
+        }
         return builder.setEndEarly(endEarly)
                 .setLetDialerHandleRinging(letDialerHandleRinging)
                 .setAcquireAudioFocus(shouldAcquireAudioFocus)
